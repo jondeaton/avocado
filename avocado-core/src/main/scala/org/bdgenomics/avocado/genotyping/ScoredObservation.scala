@@ -105,63 +105,32 @@ private[genotyping] object ScoredObservation extends Serializable {
     val maxCopyNumber = copyNumbers.max
     val sqlContext = SQLContext.getOrCreate(sc)
     import sqlContext.implicits._
+
+    def allValuePermutations(values: Seq[Seq[Any]], tail: Seq[Seq[Any]] = Nil): Seq[Seq[Any]] = {
+      values match {
+        case Nil => Nil
+        case _ => allValuePermutations(values.tail,
+          tail match {
+            case Nil => values.head.flatMap(v => Seq(Seq(v)))
+            case _ => values.head.flatMap(v => tail.flatMap(permutation => v +: permutation))
+        })
+    }
+
+    val booleanPermutations = allBooleanPermutations(4)
+
     sqlContext.createDataset(
       (Seq(None.asInstanceOf[Option[Int]]) ++
-        (1 to maxQuality).map(q => Some(q))).flatMap(optQ => {
-          (1 to maxMapQ).flatMap(mq => {
-            copyNumbers.flatMap(copyNumber => {
-              Seq(
-                ScoredObservation(true, true, true, true,
-                  optQ, mq,
-                  copyNumber, maxCopyNumber),
-                ScoredObservation(false, true, true, true,
-                  optQ, mq,
-                  copyNumber, maxCopyNumber),
-                ScoredObservation(true, false, true, true,
-                  optQ, mq,
-                  copyNumber, maxCopyNumber),
-                ScoredObservation(false, false, true, true,
-                  optQ, mq,
-                  copyNumber, maxCopyNumber),
-                ScoredObservation(true, true, false, true,
-                  optQ, mq,
-                  copyNumber, maxCopyNumber),
-                ScoredObservation(false, true, false, true,
-                  optQ, mq,
-                  copyNumber, maxCopyNumber),
-                ScoredObservation(true, false, false, true,
-                  optQ, mq,
-                  copyNumber, maxCopyNumber),
-                ScoredObservation(false, false, false, true,
-                  optQ, mq,
-                  copyNumber, maxCopyNumber),
-                ScoredObservation(true, true, true, false,
-                  optQ, mq,
-                  copyNumber, maxCopyNumber),
-                ScoredObservation(false, true, true, false,
-                  optQ, mq,
-                  copyNumber, maxCopyNumber),
-                ScoredObservation(true, false, true, false,
-                  optQ, mq,
-                  copyNumber, maxCopyNumber),
-                ScoredObservation(false, false, true, false,
-                  optQ, mq,
-                  copyNumber, maxCopyNumber),
-                ScoredObservation(true, true, false, false,
-                  optQ, mq,
-                  copyNumber, maxCopyNumber),
-                ScoredObservation(false, true, false, false,
-                  optQ, mq,
-                  copyNumber, maxCopyNumber),
-                ScoredObservation(true, false, false, false,
-                  optQ, mq,
-                  copyNumber, maxCopyNumber),
-                ScoredObservation(false, false, false, false,
-                  optQ, mq,
-                  copyNumber, maxCopyNumber))
+        (1 to maxQuality).map(q => Some(q))).flatMap(optQuality => {
+        (1 to maxMapQ).flatMap(mapQ => {
+          copyNumbers.flatMap(copyNumber =>
+            booleanPermutations.map(bools => {
+              val (isRef, isOther, isNonRef, forwardStrand) = bools
+              ScoredObservation(isRef, isOther, isNonRef, forwardStrand,
+                optQuality, mapQ, copyNumber, maxCopyNumber)
             })
-          })
-        }))
+          )
+        })
+      }))
   }
 
   /**
@@ -170,7 +139,7 @@ private[genotyping] object ScoredObservation extends Serializable {
    * @param sc A SparkContext to use to access the Spark SQL APIs.
    * @param maxQuality The highest base quality score to allow.
    * @param maxMapQ The highest mapping quality score to allow.
-   * @param copyNumber The number of chromosomes to build in the table.
+   * @param copyNumberRange The number of chromosomes to build in the table.
    * @return Returns a DataFrame of ScoredObservations, with the arrays in the
    *   schema flattened.
    */
@@ -183,7 +152,7 @@ private[genotyping] object ScoredObservation extends Serializable {
 
     val maxCopyNumber = copyNumberRange.max
 
-    scoreDf.select((
+    scoreDf.select(
       Seq(scoreDf("isRef"),
         scoreDf("isOther"),
         scoreDf("isNonRef"),
@@ -207,7 +176,7 @@ private[genotyping] object ScoredObservation extends Serializable {
         }) ++ Seq(scoreDf("alleleCoverage"),
           scoreDf("otherCoverage"),
           scoreDf("totalCoverage"),
-          scoreDf("copyNumber"))): _*)
+          scoreDf("copyNumber")): _*)
   }
 }
 
@@ -225,7 +194,7 @@ private[genotyping] object ScoredObservation extends Serializable {
  * @param otherForwardStrand The number of reads covering the site but not
  *   matching the allele observed on the forward strand.
  * @param squareMapQ The sum of the squares of the mapping qualities observed.
- * @param alleleLogLikelihoods The log likelihoods that 0...n copies of the
+ * @param referenceLogLikelihoods The log likelihoods that 0...n copies of the
  *   reference allele were observed.
  * @param alleleLogLikelihoods The log likelihoods that 0...n copies of this
  *   allele were observed.
